@@ -2,14 +2,13 @@ package com.booleanuk.OrderService.controllers;
 
 
 import com.booleanuk.OrderService.models.Order;
+import com.booleanuk.OrderService.repositories.OrderRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import software.amazon.awssdk.regions.Region;
+import org.springframework.web.server.ResponseStatusException;
 import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
 import software.amazon.awssdk.services.eventbridge.model.PutEventsRequest;
 import software.amazon.awssdk.services.eventbridge.model.PutEventsRequestEntry;
@@ -20,6 +19,7 @@ import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @RestController
@@ -29,11 +29,12 @@ public class OrderController {
     private final SnsClient snsClient;
     private final EventBridgeClient eventBridgeClient;
     private final ObjectMapper objectMapper;
+    private final OrderRepository repository;
     private final String queueUrl;
     private final String topicArn;
     private final String eventBusName;
 
-    public OrderController() {
+    public OrderController(OrderRepository repository) {
         this.sqsClient = SqsClient.builder().build();
         this.snsClient = SnsClient.builder().build();
         this.eventBridgeClient = EventBridgeClient.builder().build();
@@ -43,10 +44,12 @@ public class OrderController {
         this.eventBusName = "";
 
         this.objectMapper = new ObjectMapper();
+
+        this.repository = repository;
     }
 
     @GetMapping
-    public ResponseEntity<String> GetAllOrders() {
+    public ResponseEntity<List<Order>> GetAllOrders() {
         ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
                 .queueUrl(queueUrl)
                 .maxNumberOfMessages(10)
@@ -54,11 +57,11 @@ public class OrderController {
                 .build();
 
         List<Message> messages = sqsClient.receiveMessage(receiveRequest).messages();
+        List<Order> orders = new ArrayList<>();
 
         for (Message message : messages) {
             try {
-                Order order = this.objectMapper.readValue(message.body(), Order.class);
-                this.processOrder(order);
+                orders.add(this.objectMapper.readValue(message.body(), Order.class));
 
                 DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
                         .queueUrl(queueUrl)
@@ -67,15 +70,15 @@ public class OrderController {
 
                 sqsClient.deleteMessage(deleteRequest);
             } catch (JsonProcessingException e) {
-//                e.printStackTrace();
+                e.printStackTrace();
             }
         }
-        String status = String.format("%d Orders have been processed", messages.size());
-        return ResponseEntity.ok(status);
+
+        return ResponseEntity.ok(orders);
     }
 
     @PostMapping
-    public ResponseEntity<String> createOrder(@RequestBody Order order) {
+    public ResponseEntity<Order> createOrder(@RequestBody Order order) {
         try {
             String orderJson = objectMapper.writeValueAsString(order);
             System.out.println(orderJson);
@@ -98,15 +101,10 @@ public class OrderController {
 
             this.eventBridgeClient.putEvents(putEventsRequest);
 
-            String status = "Order created, Message Published to SNS and Event Emitted to EventBridge";
-            return ResponseEntity.ok(status);
+            return ResponseEntity.ok(this.repository.save(order));
         } catch (JsonProcessingException e) {
-//            e.printStackTrace();
-            return ResponseEntity.status(500).body("Failed to create order");
+            e.printStackTrace();
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
         }
-    }
-
-    private void processOrder(Order order) {
-        System.out.println(order.toString());
     }
 }
