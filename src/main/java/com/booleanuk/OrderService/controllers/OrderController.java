@@ -25,13 +25,13 @@ import java.util.List;
 @RestController
 @RequestMapping("orders")
 public class OrderController {
-    private SqsClient sqsClient;
-    private SnsClient snsClient;
-    private EventBridgeClient eventBridgeClient;
-    private ObjectMapper objectMapper;
-    private String queueUrl;
-    private String topicArn;
-    private String eventBusName;
+    private final SqsClient sqsClient;
+    private final SnsClient snsClient;
+    private final EventBridgeClient eventBridgeClient;
+    private final ObjectMapper objectMapper;
+    private final String queueUrl;
+    private final String topicArn;
+    private final String eventBusName;
 
     public OrderController() {
         this.sqsClient = SqsClient.builder().build();
