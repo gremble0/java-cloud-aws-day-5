@@ -131,4 +131,41 @@ public class OrderController {
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND))
         );
     }
+
+    @DeleteMapping(value = "{id}")
+    public ResponseEntity<Order> delete(@PathVariable int id) {
+        var existing = this.repository.findById(id);
+
+        ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
+            .queueUrl(queueUrl)
+            .maxNumberOfMessages(10)
+            .waitTimeSeconds(5)
+            .build();
+
+        List<Message> messages = sqsClient.receiveMessage(receiveRequest).messages();
+
+        for (Message message : messages) {
+            try {
+                JsonNode jsonNode = objectMapper.readTree(message.body());
+                String orderJson = jsonNode.get("Message").asText();
+                Order queueOrder = objectMapper.readValue(orderJson, Order.class);
+
+                if (queueOrder.getId() == id) {
+                    DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
+                        .queueUrl(queueUrl)
+                        .receiptHandle(message.receiptHandle())
+                        .build();
+
+                    sqsClient.deleteMessage(deleteRequest);
+                    break;
+                }
+            } catch (JsonProcessingException e) {
+                System.err.println("Error processing message while searching for order " + id);
+                e.printStackTrace();
+            }
+        }
+
+        this.repository.deleteById(id);
+        return ResponseEntity.ok(existing.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND)));
+    }
 }
