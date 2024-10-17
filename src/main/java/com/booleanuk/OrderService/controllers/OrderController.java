@@ -4,6 +4,7 @@ package com.booleanuk.OrderService.controllers;
 import com.booleanuk.OrderService.models.Order;
 import com.booleanuk.OrderService.repositories.OrderRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -49,7 +50,7 @@ public class OrderController {
     }
 
     @GetMapping
-    public ResponseEntity<List<Order>> GetAllOrders() {
+    public ResponseEntity<List<Order>> get() {
         ReceiveMessageRequest receiveRequest = ReceiveMessageRequest.builder()
                 .queueUrl(queueUrl)
                 .maxNumberOfMessages(10)
@@ -61,14 +62,16 @@ public class OrderController {
 
         for (Message message : messages) {
             try {
-                orders.add(this.objectMapper.readValue(message.body(), Order.class));
+                JsonNode jsonNode = objectMapper.readTree(message.body());
+                String orderJson = jsonNode.get("Message").asText();
+                orders.add(this.objectMapper.readValue(orderJson, Order.class));
 
                 DeleteMessageRequest deleteRequest = DeleteMessageRequest.builder()
                         .queueUrl(queueUrl)
                         .receiptHandle(message.receiptHandle())
                         .build();
 
-                sqsClient.deleteMessage(deleteRequest);
+                this.sqsClient.deleteMessage(deleteRequest);
             } catch (JsonProcessingException e) {
                 e.printStackTrace();
             }
@@ -78,10 +81,10 @@ public class OrderController {
     }
 
     @PostMapping
-    public ResponseEntity<Order> createOrder(@RequestBody Order order) {
+    public ResponseEntity<Order> post(@RequestBody Order order) {
         try {
-            String orderJson = objectMapper.writeValueAsString(order);
-            System.out.println(orderJson);
+            Order saved = this.repository.save(order);
+            String orderJson = objectMapper.writeValueAsString(saved);
             PublishRequest publishRequest = PublishRequest.builder()
                     .topicArn(topicArn)
                     .message(orderJson)
@@ -101,7 +104,7 @@ public class OrderController {
 
             this.eventBridgeClient.putEvents(putEventsRequest);
 
-            return ResponseEntity.ok(this.repository.save(order));
+            return ResponseEntity.ok(saved);
         } catch (JsonProcessingException e) {
             e.printStackTrace();
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
