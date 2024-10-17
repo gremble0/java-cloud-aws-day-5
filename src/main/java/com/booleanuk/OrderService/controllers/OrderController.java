@@ -83,8 +83,8 @@ public class OrderController {
     @PostMapping
     public ResponseEntity<Order> post(@RequestBody Order order) {
         try {
-            Order saved = this.repository.save(order);
-            String orderJson = objectMapper.writeValueAsString(saved);
+            Order processed = this.process(order);
+            String orderJson = objectMapper.writeValueAsString(processed);
             PublishRequest publishRequest = PublishRequest.builder()
                     .topicArn(topicArn)
                     .message(orderJson)
@@ -104,10 +104,31 @@ public class OrderController {
 
             this.eventBridgeClient.putEvents(putEventsRequest);
 
-            return ResponseEntity.ok(saved);
+            return ResponseEntity.ok(processed);
         } catch (JsonProcessingException e) {
             e.printStackTrace();
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST);
         }
+    }
+
+    private Order process(Order order) {
+        order.setTotal(order.getQuantity() * order.getAmount());
+        order.setProcessed(true);
+        return this.repository.save(order);
+    }
+
+    @PutMapping(value = "{id}")
+    public ResponseEntity<Order> put(@PathVariable int id, @RequestBody Order order) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+            this.repository.findById(id)
+            .map(existing -> {
+                existing.setAmount(order.getAmount());
+                existing.setQuantity(order.getQuantity());
+                existing.setProduct(order.getProduct());
+                existing.setTotal(existing.getQuantity() * existing.getAmount());
+                return existing;
+            })
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND))
+        );
     }
 }
